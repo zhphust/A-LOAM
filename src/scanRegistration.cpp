@@ -81,6 +81,7 @@ bool PUB_EACH_LINE = false;
 
 double MINIMUM_RANGE = 0.1;
 
+// 去除距离小于阈值的点
 template <typename PointT>
 void removeClosedPointCloud(const pcl::PointCloud<PointT> &cloud_in,
                             pcl::PointCloud<PointT> &cloud_out, float thres) {
@@ -131,6 +132,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
   removeClosedPointCloud(laserCloudIn, laserCloudIn, MINIMUM_RANGE);
 
   int cloudSize = laserCloudIn.points.size();
+  // 第一个点和最后一个点的角度值（反正切）
   float startOri = -atan2(laserCloudIn.points[0].y, laserCloudIn.points[0].x);
   float endOri = -atan2(laserCloudIn.points[cloudSize - 1].y,
                         laserCloudIn.points[cloudSize - 1].x) +
