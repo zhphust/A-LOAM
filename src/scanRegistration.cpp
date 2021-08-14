@@ -56,17 +56,20 @@ using std::atan2;
 using std::cos;
 using std::sin;
 
-const double scanPeriod = 0.1;
+const double scanPeriod = 0.1;   // 扫描周期0.1s(10Hz)
 
 const int systemDelay = 0;
 int systemInitCount = 0;
 bool systemInited = false;
-int N_SCANS = 0;
-float cloudCurvature[400000];
-int cloudSortInd[400000];
-int cloudNeighborPicked[400000];
-int cloudLabel[400000];
+int N_SCANS = 0;                // 雷达线数
 
+constexpr long POINT_NUMS = 400000; // 边缘点的个数
+float cloudCurvature[POINT_NUMS];
+int cloudSortInd[POINT_NUMS];
+int cloudNeighborPicked[POINT_NUMS];
+int cloudLabel[POINT_NUMS];
+
+// 比较谓词，按照曲率从小到大
 bool comp(int i, int j) { return (cloudCurvature[i] < cloudCurvature[j]); }
 
 ros::Publisher pubLaserCloud;
@@ -135,6 +138,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
   // 第一个点和最后一个点的角度值（反正切）
   // 为什么取负值？
   // 雷达顺时针旋转，和实际坐标系相反
+  // -atan2范围：-pi~pi
   float startOri = -atan2(laserCloudIn.points[0].y, laserCloudIn.points[0].x);
   float endOri = -atan2(laserCloudIn.points[cloudSize - 1].y,
                         laserCloudIn.points[cloudSize - 1].x) +
@@ -222,7 +226,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
   cloudSize = count;
   printf("points size %d \n", cloudSize);
 
-  pcl::PointCloud<PointType>::Ptr laserCloud(new pcl::PointCloud<PointType>());
+  pcl::PointCloud<PointType>::Ptr laserCloud(new pcl::PointCloud<PointType>());  // 总的点云
   for (int i = 0; i < N_SCANS; i++) {
     scanStartInd[i] = laserCloud->size() + 5;   // 起始索引去除该线前5个点
     *laserCloud += laserCloudScans[i];
@@ -231,6 +235,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
 
   printf("prepare time %f \n", t_prepare.toc());
 
+  // 计算曲率，根据当前点最近的10个点计算模长
   for (int i = 5; i < cloudSize - 5; i++) {
     float diffX = laserCloud->points[i - 5].x + laserCloud->points[i - 4].x +
                   laserCloud->points[i - 3].x + laserCloud->points[i - 2].x +
@@ -254,7 +259,8 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
     cloudCurvature[i] = diffX * diffX + diffY * diffY + diffZ * diffZ;       // 用10个点计算得到的曲率
     cloudSortInd[i] = i;                                                     // 用于对曲率排序的索引
     cloudNeighborPicked[i] = 0;                                              // 该点选中标志
-    cloudLabel[i] = 0;                                                       // 该点类型（边缘、平面）
+    cloudLabel[i] = 0;                                                       // 该点类型（边缘（2， 1）、平面）
+
   }
 
   TicToc t_pts;
@@ -277,21 +283,24 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
           scanStartInd[i] + (scanEndInd[i] - scanStartInd[i]) * (j + 1) / 6 - 1;
 
       TicToc t_tmp;
-      // 根据曲率对索引进行排序，其实可以考虑使用map
+      // 根据曲率对每一段索引进行排序，从小到大
       std::sort(cloudSortInd + sp, cloudSortInd + ep + 1, comp);
       t_q_sort += t_tmp.toc();       // 总的排序时间
 
-      int largestPickedNum = 0;
+      int largestPickedNum = 0; 
+      // 寻找边缘点     
       for (int k = ep; k >= sp; k--) {
         // 逆向，从曲率最大的点开始循环
         int ind = cloudSortInd[k];
         if (cloudNeighborPicked[ind] == 0 && cloudCurvature[ind] > 0.1) {
-          largestPickedNum++;
+          largestPickedNum++;    
           if (largestPickedNum <= 2) {
+            // 每一段只选取曲率最大的两个点作为边缘点
             cloudLabel[ind] = 2;            // 边缘点
             cornerPointsSharp.push_back(laserCloud->points[ind]);
             cornerPointsLessSharp.push_back(laserCloud->points[ind]);
           } else if (largestPickedNum <= 20) {
+            // 选取曲率最大的前20个点作为次边缘点
             cloudLabel[ind] = 1;            // 次边缘点
             cornerPointsLessSharp.push_back(laserCloud->points[ind]);
           } else {
@@ -300,7 +309,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
 
           cloudNeighborPicked[ind] = 1;    // 点被选中
 
-          // 与该点相邻的10个点，如果距离过近，标记为选中点，避免过密
+          // 与该点相邻的10个点，两两比较，如果距离过近，标记为选中点，避免过密
           for (int l = 1; l <= 5; l++) {
             float diffX = laserCloud->points[ind + l].x -
                           laserCloud->points[ind + l - 1].x;
@@ -311,7 +320,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
             if (diffX * diffX + diffY * diffY + diffZ * diffZ > 0.05) {
               break;
             }
-            cloudNeighborPicked[ind + l] = 1;
+            cloudNeighborPicked[ind + l] = 1;  // 标记
           }
           for (int l = -1; l >= -5; l--) {
             float diffX = laserCloud->points[ind + l].x -
@@ -323,20 +332,22 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
             if (diffX * diffX + diffY * diffY + diffZ * diffZ > 0.05) {
               break;
             }
-
             cloudNeighborPicked[ind + l] = 1;
           }
         }
       }
 
       int smallestPickedNum = 0;
+      // 寻找平面点
       for (int k = sp; k <= ep; k++) {
         // 正向，从曲率较小的点开始选择
         int ind = cloudSortInd[k];
+        // 所有的边缘点和离边缘点较近的点已被标记过
         if (cloudNeighborPicked[ind] == 0 && cloudCurvature[ind] < 0.1) {
           cloudLabel[ind] = -1;     // 平面点  
           surfPointsFlat.push_back(laserCloud->points[ind]);
           smallestPickedNum++;
+          // 每一段，平面点只保留曲率最小的4个点
           if (smallestPickedNum >= 4) {
             break;
           }
@@ -371,18 +382,18 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
 
       for (int k = sp; k <= ep; k++) {
         if (cloudLabel[k] <= 0) {
-          surfPointsLessFlatScan->push_back(laserCloud->points[k]);
+          surfPointsLessFlatScan->push_back(laserCloud->points[k]); // 对于每一条扫描线，添加所有非边缘点
         }
       }
     }
 
     pcl::PointCloud<PointType> surfPointsLessFlatScanDS;
-    pcl::VoxelGrid<PointType> downSizeFilter;             // 对平面、次平面点进行下采样
+    pcl::VoxelGrid<PointType> downSizeFilter;             // 对非边缘点进行下采样
     downSizeFilter.setInputCloud(surfPointsLessFlatScan);
     downSizeFilter.setLeafSize(0.2, 0.2, 0.2);
     downSizeFilter.filter(surfPointsLessFlatScanDS);
 
-    surfPointsLessFlat += surfPointsLessFlatScanDS;
+    surfPointsLessFlat += surfPointsLessFlatScanDS;       // 所有的非边缘点
   }
   printf("sort q time %f \n", t_q_sort);
   printf("seperate points time %f \n", t_pts.toc());
@@ -412,7 +423,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
   pubSurfPointsFlat.publish(surfPointsFlat2);
 
   sensor_msgs::PointCloud2 surfPointsLessFlat2;
-  pcl::toROSMsg(surfPointsLessFlat, surfPointsLessFlat2);          // 次平面点
+  pcl::toROSMsg(surfPointsLessFlat, surfPointsLessFlat2);          // 非边缘点
   surfPointsLessFlat2.header.stamp = laserCloudMsg->header.stamp;
   surfPointsLessFlat2.header.frame_id = "/camera_init";
   pubSurfPointsLessFlat.publish(surfPointsLessFlat2);
@@ -435,6 +446,7 @@ void laserCloudHandler(const sensor_msgs::PointCloud2ConstPtr &laserCloudMsg) {
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "scanRegistration");     // 初始化节点
+
   ros::NodeHandle nh;                            // 声明节点句柄
 
   nh.param<int>("scan_line", N_SCANS, 16);
@@ -448,9 +460,11 @@ int main(int argc, char **argv) {
     return 0;
   }
 
+  // 订阅点云数据
   ros::Subscriber subLaserCloud = nh.subscribe<sensor_msgs::PointCloud2>(
       "/velodyne_points", 100, laserCloudHandler);
 
+  // 发布边缘、平面等点云数据
   pubLaserCloud =
       nh.advertise<sensor_msgs::PointCloud2>("/velodyne_cloud_2", 100);
 

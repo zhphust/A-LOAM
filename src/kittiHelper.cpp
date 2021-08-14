@@ -25,9 +25,9 @@
 std::vector<float> read_lidar_data(const std::string lidar_data_path) {
   std::ifstream lidar_data_file(lidar_data_path,
                                 std::ifstream::in | std::ifstream::binary);
-  lidar_data_file.seekg(0, std::ios::end);
-  const size_t num_elements = lidar_data_file.tellg() / sizeof(float);
-  lidar_data_file.seekg(0, std::ios::beg);
+  lidar_data_file.seekg(0, std::ios::end);       // 到流尾部
+  const size_t num_elements = lidar_data_file.tellg() / sizeof(float); // 计算元素个数
+  lidar_data_file.seekg(0, std::ios::beg);       // 到流头部
 
   std::vector<float> lidar_data_buffer(num_elements);
   lidar_data_file.read(reinterpret_cast<char *>(&lidar_data_buffer[0]),
@@ -37,7 +37,9 @@ std::vector<float> read_lidar_data(const std::string lidar_data_path) {
 
 int main(int argc, char **argv) {
   ros::init(argc, argv, "kitti_helper");
+
   ros::NodeHandle n("~");
+
   std::string dataset_folder, sequence_number, output_bag_file;
   n.getParam("dataset_folder", dataset_folder);
   n.getParam("sequence_number", sequence_number);
@@ -51,6 +53,7 @@ int main(int argc, char **argv) {
   n.getParam("publish_delay", publish_delay);
   publish_delay = publish_delay <= 0 ? 1 : publish_delay;
 
+  // 发布点云数据
   ros::Publisher pub_laser_cloud =
       n.advertise<sensor_msgs::PointCloud2>("/velodyne_points", 2);
 

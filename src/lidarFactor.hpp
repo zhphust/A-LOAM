@@ -27,17 +27,19 @@ struct LidarEdgeFactor {
 
     // Eigen::Quaternion<T> q_last_curr{q[3], T(s) * q[0], T(s) * q[1], T(s) *
     // q[2]};
-    Eigen::Quaternion<T> q_last_curr{q[3], q[0], q[1], q[2]};
-    Eigen::Quaternion<T> q_identity{T(1), T(0), T(0), T(0)};
-    q_last_curr = q_identity.slerp(T(s), q_last_curr);
-    Eigen::Matrix<T, 3, 1> t_last_curr{T(s) * t[0], T(s) * t[1], T(s) * t[2]};
+    Eigen::Quaternion<T> q_last_curr{q[3], q[0], q[1], q[2]};  // 待优化四元数
+    Eigen::Quaternion<T> q_identity{T(1), T(0), T(0), T(0)};   // 单位四元数，插值用
+    q_last_curr = q_identity.slerp(T(s), q_last_curr);         // 球形插值
+    Eigen::Matrix<T, 3, 1> t_last_curr{T(s) * t[0], T(s) * t[1], T(s) * t[2]};  // 待优化平移变量
 
     Eigen::Matrix<T, 3, 1> lp;
-    lp = q_last_curr * cp + t_last_curr;
+    lp = q_last_curr * cp + t_last_curr;                       // 变换到帧前
 
-    Eigen::Matrix<T, 3, 1> nu = (lp - lpa).cross(lp - lpb);
+    Eigen::Matrix<T, 3, 1> nu = (lp - lpa).cross(lp - lpb);  
     Eigen::Matrix<T, 3, 1> de = lpa - lpb;
 
+    // 个人理解：
+    // 叉乘得到的是向量，因此残差仍采用向量的模式
     residual[0] = nu.x() / de.norm();
     residual[1] = nu.y() / de.norm();
     residual[2] = nu.z() / de.norm();
@@ -64,7 +66,7 @@ struct LidarPlaneFactor {
       : curr_point(curr_point_), last_point_j(last_point_j_),
         last_point_l(last_point_l_), last_point_m(last_point_m_), s(s_) {
     ljm_norm = (last_point_j - last_point_l).cross(last_point_j - last_point_m);
-    ljm_norm.normalize();
+    ljm_norm.normalize();           // 进行归一化处理
   }
 
   template <typename T>
@@ -78,7 +80,7 @@ struct LidarPlaneFactor {
     // T(last_point_l.z())}; Eigen::Matrix<T, 3, 1> lpm{T(last_point_m.x()),
     // T(last_point_m.y()), T(last_point_m.z())};
     Eigen::Matrix<T, 3, 1> ljm{T(ljm_norm.x()), T(ljm_norm.y()),
-                               T(ljm_norm.z())};
+                               T(ljm_norm.z())};   // 叉乘是向量
 
     // Eigen::Quaternion<T> q_last_curr{q[3], T(s) * q[0], T(s) * q[1], T(s) *
     // q[2]};
@@ -90,7 +92,7 @@ struct LidarPlaneFactor {
     Eigen::Matrix<T, 3, 1> lp;
     lp = q_last_curr * cp + t_last_curr;
 
-    residual[0] = (lp - lpj).dot(ljm);
+    residual[0] = (lp - lpj).dot(ljm);   // 向量点乘向量，得到标量，ljm已进行归一化处理
 
     return true;
   }
